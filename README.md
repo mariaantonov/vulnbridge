@@ -4,6 +4,7 @@ A lightweight vulnerability triage and remediation card generator that interface
 
 ## Features
 - **NVD API Integration:** Queries live CVSS v3.1 and v3.0 metrics, severity ratings, and technical vector strings.
+- **CISA KEV Threat Intel:** Cross-references the CISA Known Exploited Vulnerabilities catalog to detect active in-the-wild exploitation and compliance due dates.
 - **Automated Ticket Formatting:** Generates clean Markdown/Jira-style cards with triage summaries and recommended remediation workflows.
 - **Export Ready:** Automatically writes remediation cards to local markdown artifacts for integration into issue trackers.
 

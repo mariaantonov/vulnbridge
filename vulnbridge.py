@@ -1,6 +1,9 @@
 import sys
-import requests
+import os
+import time
 import json
+from pathlib import Path
+import requests
 
 NVD_API_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0?cveId="
 CISA_KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
@@ -48,27 +51,59 @@ def fetch_epss_score(cve_id: str) -> dict:
         return {"available": False}
 
 
-def check_cisa_kev(cve_id: str) -> dict:
-    """Check if the CVE is in CISA's Known Exploited Vulnerabilities catalog."""
-    try:
-        response = requests.get(CISA_KEV_URL, timeout=10)
-        response.raise_for_status()
-        kev_catalog = response.json()
+CACHE_DIR = Path.home() / ".cache" / "vulnbridge"
+KEV_CACHE_FILE = CACHE_DIR / "cisa_kev.json"
+CACHE_TTL_SECONDS = 86400  # 24 hours
 
-        for entry in kev_catalog.get("vulnerabilities", []):
-            if entry.get("cveID", "").upper() == cve_id.strip().upper():
-                return {
-                    "is_known_exploited": True,
-                    "date_added": entry.get("dateAdded", "N/A"),
-                    "due_date": entry.get("dueDate", "N/A"),
-                    "required_action": entry.get(
-                        "requiredAction", "Apply mitigations per vendor guidance."
-                    ),
-                }
-        return {"is_known_exploited": False}
-    except requests.exceptions.RequestException as e:
-        print(f"[!] Warning: Unable to check CISA KEV feed ({e})")
-        return {"is_known_exploited": False}
+def load_cached_kev() -> dict | None:
+    """Load CISA KEV from local disk if present and younger than 24 hours."""
+    if not KEV_CACHE_FILE.exists():
+        return None
+    file_age = time.time() - os.path.getmtime(KEV_CACHE_FILE)
+    if file_age > CACHE_TTL_SECONDS:
+        return None
+    try:
+        with open(KEV_CACHE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def save_cached_kev(data: dict) -> None:
+    """Write CISA KEV data to disk cache."""
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        with open(KEV_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except OSError:
+        pass
+
+
+def check_cisa_kev(cve_id: str) -> dict:
+    """Check if the CVE is in CISA KEV, using local TTL cache when fresh."""
+    kev_catalog = load_cached_kev()
+
+    if not kev_catalog:
+        try:
+            response = requests.get(CISA_KEV_URL, timeout=10)
+            response.raise_for_status()
+            kev_catalog = response.json()
+            save_cached_kev(kev_catalog)
+        except requests.exceptions.RequestException as e:
+            print(f"[!] Warning: Unable to retrieve CISA KEV feed ({e})")
+            return {"is_known_exploited": False}
+
+    for entry in kev_catalog.get("vulnerabilities", []):
+        if entry.get("cveID", "").upper() == cve_id.strip().upper():
+            return {
+                "is_known_exploited": True,
+                "date_added": entry.get("dateAdded", "N/A"),
+                "due_date": entry.get("dueDate", "N/A"),
+                "required_action": entry.get(
+                    "requiredAction", "Apply mitigations per vendor guidance."
+                ),
+            }
+    return {"is_known_exploited": False}
 
 
 def fetch_cve_details(cve_id: str) -> dict:
